@@ -1,22 +1,54 @@
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { conf } from './core';
+import { isProd } from "./infrastructure/helper/is-production";
+import helmet from "helmet";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 
 export class App {
-  static readonly logger = new Logger(App.name);
-  static readonly isProd = conf.NODE_ENV === 'production';
-  static readonly HOST = this.isProd ? '0.0.0.0' : 'localhost';
+  static readonly prod = isProd();
+  static readonly HOST = this.prod ? '0.0.0.0' : 'localhost';
   static readonly api = 'api/v1';
 
   static async main() {
     const app = await NestFactory.create(AppModule);
 
+    app.use(helmet({
+      contentSecurityPolicy: this.prod ? undefined : false,
+    }));
+
+    app.enableCors({
+      origin: this.prod ? conf.CORS_ORIGINS : true, 
+      credentials: true,
+    });
+
     app.setGlobalPrefix(this.api);
-    app.enableCors();
+
+    app.useGlobalPipes(new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true
+    }));
+
+    if (!this.prod){
+      const config = new DocumentBuilder()  
+        .setTitle('Savdo API')
+        .setDescription('Barbershop AI Admin & Barber Mini App')
+        .setVersion('1.0')
+        .addCookieAuth()
+        .build();
+
+      const document = SwaggerModule.createDocument(app, config);
+      SwaggerModule.setup('docs', app, document);
+    }
 
     await app.listen(conf.PORT, this.HOST);
 
-    this.logger.log(`\n Server is running: http://${this.HOST}:${conf.PORT}/${this.api}`);
+    console.log(`\nServer is running: http://${this.HOST}:${conf.PORT}/${this.api}`);
+
+    if (!this.prod){
+      console.log(`Swagger is running: http://${this.HOST}:${conf.PORT}/docs`)
+    }
   }
 }
